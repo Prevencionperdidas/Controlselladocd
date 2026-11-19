@@ -278,6 +278,17 @@
     .scd-leyenda{display:flex;gap:14px;justify-content:center;font-size:11px;font-weight:700;margin-top:4px}
     .scd-leyenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:middle}
 
+    .anul-row{margin-bottom:10px}
+    .anul-lbl{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-weight:600;margin-bottom:4px}
+    .anul-lbl b{font-family:var(--mono);white-space:nowrap}
+    .anul-lbl small{font-weight:400;color:var(--text2)}
+
+    /* AVISO GUÍA DUPLICADA */
+    .dup-aviso{display:none;font-size:11px;font-weight:700;margin-top:6px;padding:7px 10px;border-radius:8px;line-height:1.35}
+    .dup-aviso.on{display:block}
+    .dup-aviso.err{color:var(--red);background:rgba(200,32,42,0.08);border:1px solid rgba(200,32,42,0.35)}
+    .dup-aviso.warn{color:#8a5d00;background:rgba(212,146,10,0.1);border:1px solid rgba(212,146,10,0.35)}
+
     /* SELLOS */
     .sellos-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
     .sellos-head label{font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;
@@ -347,7 +358,8 @@
     <div class="card-title">📋 Nueva Recepción de Guía</div>
     <div class="grid">
       <div class="field"><label>N° Guía</label>
-        <input id="r-guia" type="text" placeholder="Número de guía" oninput="toUpper(this)"/></div>
+        <input id="r-guia" type="text" placeholder="Número de guía" oninput="toUpper(this);avisoGuiaDup()"/>
+        <div id="r-guia-aviso" class="dup-aviso"></div></div>
       <div class="field"><label>Patente</label>
         <input id="r-patente" type="text" placeholder="Patente vehículo" oninput="toUpper(this)"/></div>
       <div class="field"><label>Equipo Origen</label>
@@ -463,7 +475,7 @@
 <!-- ===== ERRORES ===== -->
 <div class="page" id="page-errores">
   <div class="table-wrap">
-    <div class="table-header"><div class="table-header-title">🔴 Errores de Revisión</div></div>
+    <div class="table-header"><div class="table-header-title">🚫 Anulaciones en Revisión</div></div>
     <table>
       <thead><tr>
         <th>Fecha</th><th>N° Guía</th><th>Prevencionista</th><th>Motivo</th><th>Detalle</th><th>Hora</th>
@@ -616,7 +628,7 @@
 // ============================================================
 // CONSTANTES
 // ============================================================
-const VERSION   = 'v4.2';
+const VERSION   = 'v4.3';
 const DB_KEY    = 'guias_pps_v3';          // se mantiene: conserva los datos locales actuales
 const URL_KEY   = 'guias_pps_sync_url';    // claves propias de esta app (v3 usaba nombres genéricos
 const DEL_KEY   = 'guias_pps_deleted';     //  que podían cruzarse con otras apps del mismo GitHub Pages)
@@ -720,8 +732,8 @@ function renderHoy() {
     return;
   }
   tbody.innerHTML = data.map(g => {
-    const estado = g.t_sellado ? '<span class="badge badge-ok">● SELLADO</span>'
-      : g.cerrada ? '<span class="badge badge-rev">● DEVUELTA</span>'
+    const estado = g.cerrada ? '<span class="badge badge-rev">● ANULADA</span>'
+      : g.t_sellado ? '<span class="badge badge-ok">● SELLADO</span>'
       : g.t_prevencion ? '<span class="badge badge-act">● PREVENCIÓN</span>'
       : g.t_revision ? '<span class="badge badge-act">● REVISIÓN</span>'
       : '<span class="badge badge-act">● RECEPCIÓN</span>';
@@ -762,7 +774,7 @@ function buildActivoCard(g) {
   if (!p1) {
     const nS = (g.sellos||[]).length;
     btns = `<button class="btn btn-primary btn-sm" onclick="abrirModalRevision('${g.id}')">✔ Marcar Revisada</button>
-            <button class="btn btn-ghost btn-sm" onclick="abrirError('${g.id}','revision')">🔴 Error Revisión</button>
+            <button class="btn btn-danger btn-sm" onclick="abrirError('${g.id}','revision')">🚫 Anulación de Guía</button>
             ${nS ? `<div class="sellos-box">🔖 ${nS} sello(s): ${chipsSellos(g.sellos)}</div>` : ''}`;
   } else if (!p2) {
     const nS = (g.sellos||[]).length;
@@ -833,8 +845,9 @@ function chipsSellos(sellos) {
 }
 
 // ¿En qué otra guía ya se usó este sello?
+// Sellos de guías ANULADAS quedan libres; solo bloquean los de guías vigentes
 function selloUsadoEn(sello, idActual) {
-  return DB.guias.find(x => x.id !== idActual && (x.sellos||[]).includes(sello));
+  return DB.guias.find(x => x.id !== idActual && !x.cerrada && (x.sellos||[]).includes(sello));
 }
 
 function abrirModalRevision(id) {
@@ -927,7 +940,7 @@ function validarSellos() {
     if (vistos[v]) { i.classList.add('dup'); avisos.push('⚠️ '+v+' está repetido en esta guía'); }
     else {
       const otra = selloUsadoEn(v, id);
-      if (otra) { i.classList.add('usado'); avisos.push('⚠️ '+v+' ya se usó en la guía '+otra.guia+' ('+fmtDate(otra.t_recepcion)+')'); }
+      if (otra) { i.classList.add('dup'); avisos.push('⛔ '+v+' ya está en uso en la guía '+otra.guia+' ('+fmtDate(otra.t_recepcion)+')'); }
     }
     vistos[v] = true;
   });
@@ -938,15 +951,34 @@ function validarSellos() {
   if (av) { av.style.color = 'var(--red)'; av.innerHTML = [...new Set(avisos)].join('<br>'); }
 }
 
-function confirmarRevision(id) {
+let _confirmando = false;
+async function confirmarRevision(id) {
   const g = DB.guias.find(x => x.id === id);
-  if (!g) return;
+  if (!g || _confirmando) return;
   const lista = leerSellosModal();
   const sellos = [...new Set(lista)];                       // sin repetidos dentro de la guía
   if (sellos.length < lista.length) toast('ℹ️ Se quitaron sellos repetidos');
-  const usados = sellos.map(s => [s, selloUsadoEn(s, id)]).filter(x => x[1]);
-  if (usados.length && !confirm('Estos sellos ya están registrados en otra guía:\n\n' +
-      usados.map(([s,o]) => '• '+s+' → guía '+o.guia).join('\n') + '\n\n¿Confirmar de todas formas?')) return;
+  // Sellos en uso en otra guía vigente → bloqueado (locales + Sheet de todos los CD)
+  const usados = sellos.map(s => [s, selloUsadoEn(s, id)]).filter(x => x[1]).map(([s,o]) => [s, o.guia, cdDe(o)]);
+  if (sellos.length) {
+    _confirmando = true;
+    const btn = document.querySelector('#modal-guia .btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Verificando sellos...'; }
+    const srv = await verificarServidor({ sellos, excluirId: id });
+    _confirmando = false;
+    if (btn) { btn.disabled = false; btn.textContent = '✔ Confirmar Revisión'; }
+    if (srv && srv.sellos) Object.keys(srv.sellos).forEach(s => {
+      const o = srv.sellos[s][0];
+      if (o && !usados.some(u => u[0] === s)) usados.push([s, o.guia, o.cd]);
+    });
+  }
+  if (usados.length) {
+    alert('⛔ SELLOS DUPLICADOS\n\nEstos sellos ya están en uso en otra guía:\n\n' +
+      usados.map(([s,gu,cd]) => '• '+s+' → guía '+gu+(cd?' ('+cd+')':'')).join('\n') +
+      '\n\nUn sello solo se puede volver a usar si su guía fue ANULADA. Corrige los números para continuar.');
+    validarSellos();
+    return;
+  }
   g.sellos = sellos;
   cerrarModalGuia();
   avanzar(id, 'revision');
@@ -970,7 +1002,44 @@ function avanzar(id, accion) {
   toast(lbl[accion] || 'Actualizado');
 }
 
-function registrar() {
+let _registrando = false;
+
+// Guías con ese número (cualquier fecha) que este equipo conoce
+function guiasConNumero(num) {
+  const n = String(num||'').trim().toUpperCase();
+  if (!n) return [];
+  return DB.guias.filter(x => String(x.guia||'').trim().toUpperCase() === n);
+}
+
+// Aviso en vivo bajo el campo N° de guía
+function avisoGuiaDup(lista) {
+  const el = document.getElementById('r-guia-aviso');
+  if (!el) return;
+  const num = document.getElementById('r-guia').value.trim();
+  const prev = lista || guiasConNumero(num);
+  const vig = prev.find(x => !x.cerrada);
+  if (vig) {
+    el.className = 'dup-aviso on err';
+    el.innerHTML = '⛔ Guía duplicada: ya registrada '+(vig.cd&&vistaCD()==='TODOS'?'en '+vig.cd+' ':'')+'el '+(vig.fecha||'—')+(vig.receptor?' por '+vig.receptor:'');
+  } else if (prev.length) {
+    el.className = 'dup-aviso on warn';
+    el.innerHTML = 'ℹ️ Esta guía fue anulada el '+(prev[0].fecha||'—')+'. Se puede registrar de nuevo.';
+  } else {
+    el.className = 'dup-aviso'; el.innerHTML = '';
+  }
+}
+
+// Consulta al Sheet (todos los CD). Si no hay red responde null y se usa solo la validación local.
+async function verificarServidor(datos) {
+  const url = getUrl();
+  if (!url || (typeof navigator !== 'undefined' && navigator.onLine === false)) return null;
+  try {
+    const r = await gasCall(url, { action:'verificar', payload: JSON.stringify(Object.assign({ action:'verificar' }, datos)) }, 5000);
+    return (r && r.status === 'ok') ? r : null;
+  } catch(e) { return null; }
+}
+
+async function registrar() {
   const guia    = document.getElementById('r-guia').value.trim();
   const patente = document.getElementById('r-patente').value.trim();
   const origen  = document.getElementById('r-origen').value;
@@ -981,8 +1050,23 @@ function registrar() {
     toast('⚠️ Completa todos los campos obligatorios'); return;
   }
   if (!getCD()) { abrirSelectorCD(true); return; }
-  const dup = DB.guias.find(x => String(x.guia)===guia && x.fecha===hoy() && !x.cerrada && cdDe(x)===getCD());
-  if (dup && !confirm('La guía '+guia+' ya fue registrada hoy a las '+fmtTime(dup.t_recepcion)+' por '+(dup.receptor||'—')+'.\n¿Registrarla de nuevo?')) return;
+  if (_registrando) return;
+  _registrando = true;
+  try {
+    // Duplicidad: primero en este equipo, luego en el Sheet (todos los CD)
+    let previas = guiasConNumero(guia);
+    const srv = await verificarServidor({ guia });
+    if (srv && Array.isArray(srv.guias)) srv.guias.forEach(x => { if (!previas.some(p => p.id === x.id)) previas.push(x); });
+    const vigente = previas.find(x => !x.cerrada);
+    if (vigente) {
+      avisoGuiaDup(previas);
+      alert('⛔ GUÍA DUPLICADA\n\nLa guía '+guia+' ya está registrada'+
+        (vigente.cd ? ' en '+vigente.cd : '')+' el '+(vigente.fecha||'—')+
+        (vigente.receptor ? ' por '+vigente.receptor : '')+'.\n\nNo se puede registrar dos veces. Solo se puede volver a registrar si la guía anterior fue ANULADA.');
+      return;
+    }
+    if (previas.length && !confirm('La guía '+guia+' fue ANULADA anteriormente ('+(previas[0].fecha||'—')+').\n¿Registrarla nuevamente?')) return;
+  } finally { _registrando = false; }
   const g = {
     id: uid(), cd: getCD(), guia, patente, origen, destino, conductor, receptor,
     fecha: hoy(), t_recepcion: new Date().toISOString(),
@@ -998,6 +1082,7 @@ function registrar() {
   // Limpiar form
   ['r-guia','r-patente','r-conductor'].forEach(id => document.getElementById(id).value='');
   ['r-origen','r-destino','r-prev'].forEach(id => document.getElementById(id).value='');
+  avisoGuiaDup();
   renderHoy();
   updateBadge();
   toast('✅ Guía ' + guia + ' registrada');
@@ -1017,9 +1102,9 @@ function abrirError(id, tipo) {
   const esRev = tipo === 'revision';
   const motivos = esRev ? MOTIVOS_REV : MOTIVOS_SELL;
   const g = DB.guias.find(x => x.id===id);
-  document.getElementById('modal-guia-titulo').textContent = esRev ? '🔴 Error en Revisión' : '🟣 Discrepancia en Sellado';
+  document.getElementById('modal-guia-titulo').textContent = esRev ? '🚫 Anulación de Guía (Revisión)' : '🟣 Discrepancia en Sellado';
   document.getElementById('modal-guia-body').innerHTML = `
-    <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Guía: <strong>${g.guia}</strong></p>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Guía: <strong>${g.guia}</strong>${(g.sellos||[]).length?` · Sellos: <strong>${g.sellos.join(', ')}</strong>`:''}</p>
     <div class="field" style="margin-bottom:12px">
       <label>Motivo</label>
       <select id="err-motivo"><option value="">Seleccionar...</option>${motivos.map(m=>`<option>${m}</option>`).join('')}</select>
@@ -1029,10 +1114,8 @@ function abrirError(id, tipo) {
       <textarea id="err-detalle" rows="2" style="resize:vertical" placeholder="Opcional..." oninput="toUpper(this)"></textarea>
     </div>
     <div class="btn-group">
-      <button class="btn ${esRev?'btn-danger':'btn-purple'}" onclick="confirmarError(false)">
-        ${esRev?'🔴 Registrar Error':'🟣 Registrar Discrepancia'}
-      </button>
-      ${!esRev ? '<button class="btn btn-danger" onclick="confirmarError(true)">📦 Cerrar Proceso</button>' : ''}
+      ${esRev ? '' : '<button class="btn btn-purple" onclick="confirmarError(false)">🟣 Registrar Discrepancia</button>'}
+      <button class="btn btn-danger" onclick="confirmarError(true)">🚫 Anular Guía</button>
       <button class="btn btn-ghost" onclick="cerrarModalGuia()">Cancelar</button>
     </div>`;
   document.getElementById('modal-guia').classList.add('open');
@@ -1044,18 +1127,22 @@ function confirmarError(cerrar) {
   const detalle = document.getElementById('err-detalle').value.trim();
   const g = DB.guias.find(x => x.id===_errGuiaId);
   if (!g) return;
+  if (cerrar && !confirm('¿Anular la guía '+g.guia+'?\n\nMotivo: '+motivo+
+      ((g.sellos||[]).length ? '\n\nLos sellos '+g.sellos.join(', ')+' quedarán DISPONIBLES para usarse de nuevo.' : '')+
+      '\n\nEsta acción cierra la guía.')) return;
   const ts = new Date().toISOString();
   const err = { id: uid(), ts, motivo, detalle, prevencionista: g.receptor };
   if (_errTipo==='revision') g.errores_revision.push(err);
   else                       g.errores_sellado.push(err);
-  if (cerrar) { g.cerrada=true; g.t_cierre=ts; g.cierre_motivo=_errTipo; g.t_sellado=ts; }
+  // Anulada: no cuenta como sellada ni para el SLA; sus sellos quedan liberados
+  if (cerrar) { g.cerrada=true; g.t_cierre=ts; g.cierre_motivo=_errTipo; g.t_sellado=null; }
   touch(g);
   dbSave(DB);
   syncGuia(g);
   cerrarModalGuia();
   renderActivos();
   renderHoy();
-  toast('✅ Registrado');
+  toast(cerrar ? '🚫 Guía '+g.guia+' anulada'+((g.sellos||[]).length?' · sellos liberados':'') : '✅ Registrado');
 }
 
 let _obsGuiaId = null;
@@ -1162,7 +1249,7 @@ function panelSellosCD(data) {
   CDS.forEach(cd => st[cd] = { sellos:0, guias:0, conSellos:0 });
   data.forEach(g => {
     const s = st[cdDe(g)]; if (!s) return;
-    const n = (g.sellos||[]).length;
+    const n = g.cerrada ? 0 : (g.sellos||[]).length;     // anuladas: sellos liberados
     s.guias++; s.sellos += n; if (n) s.conSellos++;
   });
   const total = CDS.reduce((a,cd) => a + st[cd].sellos, 0);
@@ -1185,7 +1272,7 @@ function panelSellosCD(data) {
   for (let i=13; i>=0; i--) { const d = new Date(fin); d.setDate(d.getDate()-i); dias.push(fechaLocal(d)); }
   const serie = {}; CDS.forEach(cd => serie[cd] = dias.map(() => 0));
   data.forEach(g => {
-    const k = dias.indexOf(g.fecha); if (k < 0 || !serie[cdDe(g)]) return;
+    const k = dias.indexOf(g.fecha); if (k < 0 || !serie[cdDe(g)] || g.cerrada) return;
     serie[cdDe(g)][k] += (g.sellos||[]).length;
   });
   const W=300, H=150, PL=26, PB=22, PT=8, PR=6;
@@ -1228,6 +1315,54 @@ function panelSellosCD(data) {
       <div><div class="scd-sub">Últimos 14 días</div>${g2}</div>
       <div><div class="scd-sub">Promedio por guía</div>${g3}</div>
     </div>
+  </div>`;
+}
+
+// ── Anulaciones ──────────────────────────────────────────────
+function etapaAnulacion(g) {
+  if (g.cierre_motivo === 'revision') return 'Revisión';
+  if (g.cierre_motivo === 'sellado') return 'Sellado';
+  return (g.errores_sellado||[]).length ? 'Sellado' : 'Revisión';
+}
+function motivoAnulacion(g) {
+  const lista = etapaAnulacion(g) === 'Revisión' ? g.errores_revision : g.errores_sellado;
+  const ult = (lista||[]).slice().sort((a,b) => String(a.ts).localeCompare(String(b.ts))).pop();
+  return (ult && ult.motivo) || 'Sin motivo';
+}
+// Barras horizontales con el texto completo (los motivos son largos)
+function barrasTexto(obj, color) {
+  const e = Object.entries(obj).sort((a,b) => b[1]-a[1]);
+  const max = Math.max(1, ...e.map(x => x[1])), tot = e.reduce((a,x) => a+x[1], 0);
+  return e.map(([k,v]) => `<div class="anul-row">
+      <div class="anul-lbl"><span>${k}</span><b>${v} <small>${Math.round(v/tot*100)}%</small></b></div>
+      <div class="scd-bar" style="height:12px"><div style="width:${v/max*100}%;background:${color || COLOR_CD_GRAF[k] || '#C8202A'}"></div></div>
+    </div>`).join('');
+}
+function panelAnulaciones(data) {
+  const anul = data.filter(g => g.cerrada);
+  const pct = data.length ? (anul.length/data.length*100).toFixed(1) : '0.0';
+  const porEtapa = {}, porMotivo = {}, porCD = {};
+  anul.forEach(g => {
+    const e = etapaAnulacion(g), m = motivoAnulacion(g);
+    porEtapa[e] = (porEtapa[e]||0) + 1;
+    porMotivo[m] = (porMotivo[m]||0) + 1;
+    porCD[cdDe(g)] = (porCD[cdDe(g)]||0) + 1;
+  });
+  const liberados = anul.reduce((a,g) => a + (g.sellos||[]).length, 0);
+  const todos = vistaCD() === 'TODOS';
+  return `<div class="chart-card" style="grid-column:1/-1">
+    <div class="chart-title">🚫 Anulaciones de Guías</div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
+      <div><div class="stat-label">Guías anuladas</div><div class="stat-val" style="font-size:30px;color:var(--red)">${anul.length}</div></div>
+      <div><div class="stat-label">% sobre el total</div><div class="stat-val" style="font-size:30px">${pct}%</div></div>
+      <div><div class="stat-label">En revisión</div><div class="stat-val" style="font-size:30px">${porEtapa['Revisión']||0}</div></div>
+      <div><div class="stat-label">En sellado</div><div class="stat-val" style="font-size:30px">${porEtapa['Sellado']||0}</div></div>
+      <div><div class="stat-label">Sellos liberados</div><div class="stat-val" style="font-size:30px;color:var(--green)">${liberados}</div></div>
+    </div>
+    ${anul.length ? `<div class="scd-grid" style="grid-template-columns:${todos?'1fr 1fr':'1fr'}">
+      <div><div class="scd-sub">Por motivo</div>${barrasTexto(porMotivo, '#C8202A')}</div>
+      ${todos ? `<div><div class="scd-sub">Por CD</div>${barrasTexto(porCD, null)}</div>` : ''}
+    </div>` : '<div style="font-size:12px;color:var(--text2)">Sin anulaciones en el período 👍</div>'}
   </div>`;
 }
 
@@ -1274,7 +1409,8 @@ function renderDashboard() {
   const selladas  = data.filter(g=>g.t_sellado&&!g.cerrada);
   const activas   = data.filter(g=>!g.t_sellado&&!g.cerrada);
   const devueltas = data.filter(g=>g.cerrada);
-  const errRev    = data.reduce((a,g)=>a+(g.errores_revision||[]).length,0);
+  const anulRev   = devueltas.filter(g => etapaAnulacion(g) === 'Revisión').length;
+  const anulSell  = devueltas.length - anulRev;
   const errSell   = data.reduce((a,g)=>a+(g.errores_sellado||[]).length,0);
   const tiempos   = selladas.map(g=>elapsed(g.t_recepcion,g.t_sellado)).filter(Boolean);
   const promMs    = tiempos.length?tiempos.reduce((a,b)=>a+b,0)/tiempos.length:0;
@@ -1285,7 +1421,7 @@ function renderDashboard() {
     <div class="stat c2"><div class="stat-label">Selladas</div><div class="stat-val">${selladas.length}</div><div class="stat-sub">${data.length?Math.round(selladas.length/data.length*100):0}% completadas</div></div>
     <div class="stat c3"><div class="stat-label">En Proceso</div><div class="stat-val">${activas.length}</div><div class="stat-sub">activas ahora</div></div>
     <div class="stat c4"><div class="stat-label">T. Promedio</div><div class="stat-val" style="font-size:26px">${fmtElapsed(promMs)}</div><div class="stat-sub">SLA: 15 min</div></div>
-    <div class="stat c5"><div class="stat-label">Err. Revisión</div><div class="stat-val">${errRev}</div><div class="stat-sub">devoluciones</div></div>
+    <div class="stat c5"><div class="stat-label">Anulaciones</div><div class="stat-val">${devueltas.length}</div><div class="stat-sub">${data.length?Math.round(devueltas.length/data.length*100):0}% del total · ${anulRev} rev / ${anulSell} sell</div></div>
     <div class="stat c6"><div class="stat-label">Discrepancias</div><div class="stat-val">${errSell}</div><div class="stat-sub">en sellado</div></div>`;
 
   // ── Datos para gráficos ──────────────────────────────────────
@@ -1315,6 +1451,7 @@ function renderDashboard() {
       <div class="chart-title">📦 Distribución por Origen</div>
       ${donutChart(byOrigen)}
     </div>
+    ${panelAnulaciones(data)}
     <div class="chart-card">
       <div class="chart-title">🎯 Cumplimiento SLA (${Math.round((dentroPlazo/(dentroPlazo+fueraPlazo||1))*100)}%)</div>
       ${donutChart(slaData)}
@@ -1325,12 +1462,13 @@ function renderDashboard() {
 }
 
 // ── Catastro de sellos: una fila por sello ───────────────────
-function filasSellos(data) {
+// incluirLiberados=true agrega los sellos de guías anuladas (solo para el CSV)
+function filasSellos(data, incluirLiberados) {
   const filas = [];
-  data.forEach(g => (g.sellos||[]).forEach((s,i) => filas.push({
+  data.filter(g => incluirLiberados || !g.cerrada).forEach(g => (g.sellos||[]).forEach((s,i) => filas.push({
     cd: cdDe(g), sello: s, n: i+1, guia: g.guia, fecha: g.fecha, hora: g.t_revision || g.t_recepcion,
     patente: g.patente, origen: g.origen, destino: g.destino || g.bultos || '',
-    prev: g.receptor, estado: g.cerrada ? 'Devuelta' : g.t_sellado ? 'Sellado' : 'En proceso'
+    prev: g.receptor, estado: g.cerrada ? 'Liberado (guía anulada)' : g.t_sellado ? 'Sellado' : 'En proceso'
   })));
   return filas.sort((a,b) => String(b.hora).localeCompare(String(a.hora)));
 }
@@ -1345,7 +1483,7 @@ function renderCatastroSellos(data) {
     conteo[f.sello] = (conteo[f.sello]||0) + 1;
   });
   const repetidos = Object.entries(conteo).filter(([,n]) => n > 1);
-  const guiasCon = data.filter(g => (g.sellos||[]).length).length;
+  const guiasCon = data.filter(g => !g.cerrada && (g.sellos||[]).length).length;
   document.getElementById('sellos-resumen').innerHTML = `
     <div class="chart-card" style="grid-column:1/-1">
       <div class="chart-title">🔖 Resumen del período</div>
@@ -1362,9 +1500,9 @@ function renderCatastroSellos(data) {
 }
 
 function exportSellosCSV() {
-  const filas = filasSellos(getFiltered());
+  const filas = filasSellos(getFiltered(), true);
   if (!filas.length) { toast('⚠️ No hay sellos en el período'); return; }
-  const h = ['CD','N° Sello','Fecha','Hora','N° Guía','N° en guía','Patente','Origen','Destino','Prevencionista','Estado guía'];
+  const h = ['CD','N° Sello','Fecha','Hora','N° Guía','N° en guía','Patente','Origen','Destino','Prevencionista','Estado'];
   const r = filas.map(f => [f.cd, '="'+f.sello+'"', f.fecha, fmtTime(f.hora), f.guia, f.n, f.patente, f.origen, f.destino, f.prev, f.estado]);
   const csv = [h, ...r].map(row => row.map(v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"').join(';')).join('\n');
   const a = document.createElement('a');
@@ -1393,7 +1531,7 @@ function renderHistorial(data) {
     const safeId=String(g.id||'').replace(/"/g,'');
     const safeGui=String(g.guia||'');
     const estado=g.t_sellado&&!g.cerrada?'<span class="badge badge-ok">● SELLADO</span>'
-      :g.cerrada?'<span class="badge badge-rev">● DEVUELTA</span>'
+      :g.cerrada?'<span class="badge badge-rev">● ANULADA</span>'
       :'<span class="badge badge-act">● ACTIVO</span>';
     const f1=g.t_revision?fmtElapsed(elapsed(g.t_recepcion,g.t_revision)):'—';
     const f2=g.t_prevencion?fmtElapsed(elapsed(g.t_revision,g.t_prevencion)):'—';
@@ -1871,7 +2009,7 @@ function normalizarRemota(rg) {
   if (!rg.t_sellado) {
     const en = norm(rg.estado);
     if (en.includes('sellado')) rg.t_sellado = rg.t_recepcion;
-    if (en.includes('devuelta')) { rg.cerrada = true; rg.t_cierre = rg.t_cierre || rg.t_recepcion; }
+    if (en.includes('devuelta') || en.includes('anulada')) { rg.cerrada = true; rg.t_cierre = rg.t_cierre || rg.t_recepcion; }
   }
   rg.log = rg.log || [];
   return rg;
@@ -2003,7 +2141,7 @@ async function conectar() {
     if (!r||r.status!=='ok') throw new Error((r&&r.message)||'sin respuesta');
     if (!r.version) throw new Error('El Apps Script es una versión antigua. Pega el Code.gs v4 y publica una "Nueva versión" antes de conectar');
     if (getUrl()!==url) localStorage.removeItem(SRV_TS_KEY);
-    if (r.version < 'v4.2') throw new Error('El Apps Script es '+r.version+'. Actualízalo a v4.2 (multi-CD) y publica una "Nueva versión"');
+    if (r.version < 'v4.3') throw new Error('El Apps Script es '+r.version+'. Actualízalo a v4.3 y publica una "Nueva versión"');
     setUrl(url);
     _lastErr=null;
     showStatus('✅ Conectado ('+r.version+'). Descargando datos...','ok');
@@ -2135,7 +2273,7 @@ function exportCSV() {
     g.t_prevencion?fmtElapsed(elapsed(g.t_revision,g.t_prevencion)):'',
     g.t_sellado?fmtElapsed(elapsed(g.t_prevencion,g.t_sellado)):'',
     g.t_sellado||g.cerrada?fmtElapsed(elapsed(g.t_recepcion,g.t_sellado||g.t_cierre)):'',
-    g.t_sellado&&!g.cerrada?'Sellado':g.cerrada?'Devuelta':'Activo',
+    g.t_sellado&&!g.cerrada?'Sellado':g.cerrada?'Anulada':'Activo',
     (g.sellos||[]).length, (g.sellos||[]).join(' | ')
   ]);
   const csv=[h,...r].map(row=>row.join(';')).join('\n');
